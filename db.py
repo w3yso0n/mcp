@@ -1,12 +1,13 @@
 import logging
 import re
+import sys
 from contextlib import contextmanager
 from typing import Any
 
 import pyodbc
 
 from config import settings
-from odbc_driver import get_available_drivers, get_odbc_diagnostics, resolve_driver
+from odbc_driver import get_available_drivers, get_odbc_diagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,18 @@ FORBIDDEN_SQL_PATTERN = re.compile(
 )
 
 
+def _startup_log(message: str, level: str = "info") -> None:
+    print(f"[MCP-STARTUP] {message}", file=sys.stdout, flush=True)
+    getattr(logger, level, logger.info)(message)
+
+
 def build_connection_string() -> str:
-    driver = resolve_driver()
+    driver = settings.mssql_driver
+    if driver.strip().lower() == "auto":
+        raise RuntimeError(
+            "El driver ODBC no fue resuelto (quedó 'auto'). "
+            "Redeploy con la versión 1.1.0+ o usa MSSQL_DRIVER=ODBC Driver 18 for SQL Server."
+        )
     trust_cert = "yes" if settings.mssql_trust_server_certificate else "no"
     return (
         f"DRIVER={{{driver}}};"
@@ -32,42 +43,33 @@ def build_connection_string() -> str:
 
 def log_startup_diagnostics() -> dict[str, Any]:
     diagnostics = get_odbc_diagnostics()
-    logger.info("=== MCP SQL Server — diagnóstico ODBC ===")
-    logger.info("Servidor: %s | BD: %s | Usuario: %s", settings.mssql_server, settings.mssql_database, settings.mssql_user)
-    logger.info("MSSQL_DRIVER configurado: %s", diagnostics["configured_driver"])
-    logger.info("Drivers ODBC instalados: %s", diagnostics["available_drivers"])
-
-    if diagnostics.get("driver_ok"):
-        logger.info("Driver en uso: %s", diagnostics["resolved_driver"])
-    else:
-        logger.error("Driver ODBC: %s", diagnostics.get("error"))
+    _startup_log(f"=== Diagnóstico ODBC (app {settings.app_version}) ===")
+    _startup_log(f"Servidor={settings.mssql_server} BD={settings.mssql_database} Usuario={settings.mssql_user}")
+    _startup_log(f"MSSQL_DRIVER env={diagnostics['configured_driver']!r}")
+    _startup_log(f"Driver resuelto={diagnostics['resolved_driver']!r}")
+    _startup_log(f"Drivers instalados={diagnostics['available_drivers']}")
 
     connection = check_connection()
     if connection["connected"]:
-        logger.info("Conexión SQL Server: OK — %s", connection.get("sql_version", ""))
+        _startup_log(f"Conexión SQL Server OK — {connection.get('sql_version', '')}")
     else:
-        logger.error("Conexión SQL Server: FALLO — %s", connection.get("error"))
+        _startup_log(f"Conexión SQL Server FALLO — {connection.get('error')}", "error")
 
-    logger.info("=========================================")
+    _startup_log("=== Fin diagnóstico ===")
     return {**diagnostics, "connection": connection}
 
 
 @contextmanager
 def get_connection():
     conn_str = build_connection_string()
-    safe_log = conn_str.replace(settings.mssql_password, "***") if settings.mssql_password else conn_str
-    logger.debug("Conectando con: %s", safe_log)
     try:
         conn = pyodbc.connect(conn_str, timeout=30)
     except pyodbc.Error as exc:
-        logger.error(
-            "Error pyodbc [%s]: %s | driver=%s | server=%s | db=%s",
-            exc.args[0] if exc.args else "?",
-            exc,
-            resolve_driver(),
-            settings.mssql_server,
-            settings.mssql_database,
+        msg = (
+            f"pyodbc error driver={settings.mssql_driver!r} server={settings.mssql_server} "
+            f"db={settings.mssql_database}: {exc}"
         )
+        _startup_log(msg, "error")
         raise
     try:
         yield conn
@@ -86,15 +88,13 @@ def check_connection() -> dict[str, Any]:
         "connected": False,
         "server": settings.mssql_server,
         "database": settings.mssql_database,
-        "driver_configured": settings.mssql_driver,
-        "driver_resolved": diagnostics.get("resolved_driver"),
+        "driver_configured": diagnostics["configured_driver"],
+        "driver_resolved": diagnostics["resolved_driver"],
         "available_drivers": get_available_drivers(),
         "readonly": settings.mssql_readonly,
         "sql_version": None,
-        "error": diagnostics.get("error"),
+        "error": None,
     }
-    if not diagnostics.get("driver_ok"):
-        return result
 
     try:
         with get_connection() as conn:
@@ -102,7 +102,6 @@ def check_connection() -> dict[str, Any]:
             cursor.execute("SELECT @@VERSION AS version")
             row = cursor.fetchone()
             result["connected"] = True
-            result["error"] = None
             if row and row[0]:
                 result["sql_version"] = str(row[0]).split("\n")[0]
     except Exception as exc:

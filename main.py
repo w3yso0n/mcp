@@ -1,10 +1,12 @@
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from api import QueryRequest, api_describe_table, api_list_tables, api_run_query
+from config import settings
 from dashboard import render_dashboard
 from db import check_connection, list_tables, log_startup_diagnostics
 from mcp_server import mcp
@@ -12,12 +14,15 @@ from mcp_server import mcp
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+    force=True,
 )
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    print(f"[MCP-STARTUP] Lifespan iniciado app={settings.app_version}", flush=True)
     log_startup_diagnostics()
     async with mcp.session_manager.run():
         yield
@@ -54,6 +59,7 @@ def health():
     connection = check_connection()
     return {
         "status": "healthy" if connection["connected"] else "degraded",
+        "app_version": settings.app_version,
         "service": "mcp-base-api",
         "mcp_endpoint": "/mcp-server/mcp",
         "database_connected": connection["connected"],
@@ -71,6 +77,7 @@ def debug_odbc():
     """Diagnóstico ODBC para Coolify/Docker — muestra drivers y estado de conexión."""
     connection = check_connection()
     return {
+        "app_version": settings.app_version,
         "driver_configured": connection.get("driver_configured"),
         "driver_resolved": connection.get("driver_resolved"),
         "available_drivers": connection.get("available_drivers"),

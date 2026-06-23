@@ -5,7 +5,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8000 \
-    ACCEPT_EULA=Y
+    ACCEPT_EULA=Y \
+    APP_VERSION=1.1.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -27,4 +28,4 @@ COPY config.py odbc_driver.py db.py api.py dashboard.py mcp_server.py main.py ./
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "echo \"[MCP-STARTUP] Arrancando uvicorn puerto ${PORT} app ${APP_VERSION}\" && uvicorn main:app --host 0.0.0.0 --port ${PORT} --log-level info"]
