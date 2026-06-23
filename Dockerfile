@@ -17,12 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends msodbcsql18 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && odbcinst -q -d | grep -q "ODBC Driver 18 for SQL Server"
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY config.py db.py api.py dashboard.py mcp_server.py main.py ./
+COPY config.py odbc_driver.py db.py api.py dashboard.py mcp_server.py main.py ./
 
 EXPOSE 8000
 

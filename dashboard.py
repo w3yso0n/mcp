@@ -324,7 +324,8 @@ def render_dashboard(
                 </div>
                 <p class="detail"><span>Servidor</span><strong>{_esc(connection['server'])}</strong></p>
                 <p class="detail"><span>Base de datos</span><strong>{_esc(connection['database'])}</strong></p>
-                <p class="detail"><span>Driver ODBC</span><strong>{_esc(connection['driver'])}</strong></p>
+                <p class="detail"><span>Driver configurado</span><strong>{_esc(connection.get('driver_configured', connection.get('driver', '')))}</strong></p>
+                <p class="detail"><span>Driver en uso</span><strong>{_esc(connection.get('driver_resolved') or '—')}</strong></p>
                 <p class="detail"><span>Modo</span><strong>{'Solo lectura' if connection['readonly'] else 'Lectura/escritura'}</strong></p>
                 {version_block}
                 {error_block}

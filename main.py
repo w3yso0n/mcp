@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -5,12 +6,19 @@ from fastapi.responses import HTMLResponse
 
 from api import QueryRequest, api_describe_table, api_list_tables, api_run_query
 from dashboard import render_dashboard
-from db import check_connection, list_tables
+from db import check_connection, list_tables, log_startup_diagnostics
 from mcp_server import mcp
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_startup_diagnostics()
     async with mcp.session_manager.run():
         yield
 
@@ -51,6 +59,29 @@ def health():
         "database_connected": connection["connected"],
         "database": connection["database"],
         "server": connection["server"],
+        "driver_configured": connection.get("driver_configured"),
+        "driver_resolved": connection.get("driver_resolved"),
+        "available_drivers": connection.get("available_drivers"),
+        "error": connection.get("error"),
+    }
+
+
+@app.get("/api/debug/odbc", tags=["Diagnóstico"])
+def debug_odbc():
+    """Diagnóstico ODBC para Coolify/Docker — muestra drivers y estado de conexión."""
+    connection = check_connection()
+    return {
+        "driver_configured": connection.get("driver_configured"),
+        "driver_resolved": connection.get("driver_resolved"),
+        "available_drivers": connection.get("available_drivers"),
+        "database_connected": connection["connected"],
+        "server": connection["server"],
+        "database": connection["database"],
+        "error": connection.get("error"),
+        "hint": (
+            "En Coolify/Docker usa MSSQL_DRIVER=ODBC Driver 18 for SQL Server "
+            "o MSSQL_DRIVER=auto. 'SQL Server' solo funciona en Windows."
+        ),
     }
 
 
@@ -60,6 +91,7 @@ def get_tables(schema: str = Query(default="dbo", description="Esquema SQL")):
     try:
         return api_list_tables(schema)
     except Exception as exc:
+        logger.exception("get_tables falló schema=%s", schema)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -71,6 +103,7 @@ def get_table_description(schema: str, table: str):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("describe_table falló %s.%s", schema, table)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -82,4 +115,5 @@ def post_query(body: QueryRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("run_query falló")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
